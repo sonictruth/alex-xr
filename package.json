@@ -4,17 +4,27 @@
   "description": "Web XR, Babylon.js, Typescript, Parcel",
   "main": "index.html",
   "scripts": {
+    "prebuild": "shx rm -rf dist/*",
     "start": "parcel index.html --open",
-    "build": "parcel build index.html"
+    "build": "parcel build index.html --public-url ./",
+    "deploy": "npm run build; gh-pages --dist dist;"
   },
-  "dependencies": {},
+  "dependencies": {
+    "@babylonjs/core": "^4.1.0",
+    "@babylonjs/gui": "^4.1.0",
+    "@babylonjs/loaders": "^4.1.0",
+    "cannon": "^0.6.2"
+  },
   "keywords": [
     "typescript",
     "javascript"
   ],
+  "homepage": "https://sonictruth.github.io/alex-xr/",
   "devDependencies": {
+    "@types/cannon": "^0.1.4",
     "gh-pages": "^2.2.0",
     "parcel-bundler": "^1.12.4",
+    "shx": "^0.3.2",
     "typescript": "^3.8.3"
   }
 }
