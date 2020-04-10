@@ -4,12 +4,12 @@ body,
   padding: 0;
   margin: 0;
   height: 100%;
-  background-color: #202040;
-  color: #ffbd69
+  background-color: #fcf2d8;
+  color: black
 }
 
 a {
-  color: white;
+  color:gray;
 }
 
 #renderCanvas {
