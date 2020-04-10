@@ -1,5 +1,5 @@
-# alex-xr
+# WebXR Experiment
 
-Babylon.JS, typescript, parcel, Web XR
+Web XR using Babylon.JS, TypeScript, Parcel
 
 https://sonictruth.github.io/alex-xr/

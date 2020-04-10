@@ -1,7 +1,7 @@
 {
   "name": "alex-xr",
   "version": "1.0.0",
-  "description": "Web XR, Babylon.js, Typescript, Parcel",
+  "description": "Web XR using Babylon.JS, TypeScript, Parcel",
   "main": "index.html",
   "scripts": {
     "prebuild": "shx rm -rf dist/*",
