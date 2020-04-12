@@ -28,20 +28,21 @@ import {
   WebXRDefaultExperience
 } from '@babylonjs/core';
 import '@babylonjs/loaders';
-import '@babylonjs/gui';
-
+import * as GUI from '@babylonjs/gui';
 import Emitter from './Emitter';
+
 import WebXRPolyfill from 'webxr-polyfill';
-const webXRPolyfill = new WebXRPolyfill();
+new WebXRPolyfill();
 
 import texture from './images/texture.jpg';
 
 enum GameState {
+  Uninitialized,
+  Loading,
   Main,
   Playing,
   Win,
-  Lost,
-  Loading
+  Lost
 }
 
 enum MicrophoneSensivity {
@@ -52,16 +53,18 @@ enum MicrophoneSensivity {
 
 class App extends Emitter {
   private canvas: HTMLElement | null = null;
+  private enterXRButton: HTMLElement | null = null;
   private scene: Scene | null = null;
   private xrHelper: WebXRDefaultExperience | null = null;
 
   private bullets: Mesh[] = [];
   private bulletIndex: number = 0;
 
+  private audioContext: AudioContext | null = null;
   private microphoneSensivity: MicrophoneSensivity
     = MicrophoneSensivity.High;
 
-  private gameState = GameState.Loading;
+  private gameState: GameState = GameState.Uninitialized;
 
   constructor(
     canvas: HTMLElement | null,
@@ -69,13 +72,15 @@ class App extends Emitter {
   ) {
     super();
     this.canvas = canvas;
-    enterXRButton?.addEventListener('click', () => {
-      this.enterXR();
-    })
+    this.enterXRButton = enterXRButton;
   }
 
   private async startListeningforMicrophoneInput() {
-    const audioContext = new AudioContext();
+    if (this.audioContext !== null &&
+      this.audioContext.state === 'running') {
+      return;
+    }
+    const audioContext = this.audioContext = new AudioContext();
     let lastAudioDiff = 0;
     const mediaStreamConstraints = {
       audio: {
@@ -96,6 +101,7 @@ class App extends Emitter {
     microphoneAudioNode.connect(analyserNode);
     const scriptNode: ScriptProcessorNode =
       audioContext.createScriptProcessor(0, 1, 1);
+
     if (scriptNode !== null) {
       scriptNode.connect(analyserNode);
       scriptNode.onaudioprocess = () => {
@@ -263,10 +269,14 @@ class App extends Emitter {
   private async enterXR() {
     try {
       await this.startListeningforMicrophoneInput();
+    } catch (error) {
+      alert('Error getting microphone. Sound input disabled. ' + error);
+    }
+    try {
       await this.xrHelper?.baseExperience
         .enterXRAsync('immersive-vr', 'local-floor');
     } catch (error) {
-      alert(error);
+      alert('Error entering VR mode. ' + error);
     }
   }
 
@@ -332,22 +342,57 @@ class App extends Emitter {
     sphere.position.y = 2;
     sphere.position.x = 0;
     //////
+
+    const plane = MeshBuilder.CreatePlane('plane', { size: 2 });
+    plane.parent = sphere;
+    plane.position.y = 2;
+
+    const advancedTexture = GUI.AdvancedDynamicTexture.CreateForMesh(plane);
+
+    const button1 = GUI.Button.CreateSimpleButton("but1", "Click Me");
+    button1.width = 1;
+    button1.height = 0.4;
+    button1.color = "white";
+    button1.fontSize = 50;
+    button1.background = "green";
+    button1.onPointerUpObservable.add(() => {
+      this.throwBullet();
+    });
+    advancedTexture.addControl(button1);
+
+    //
+
     scene.onPointerObservable.add((event) => {
       if (event.type == PointerEventTypes.POINTERDOWN) {
-        this.throwBullet();
+        // this.throwBullet();
       }
     });
+    
     this.xrHelper = await this.setupXR(scene, ground);
     return scene;
   }
 
-  async run() {
-    const scene = await this.createScene(<HTMLElement>this.canvas);
-    this.gameState = GameState.Main;
-    scene.getEngine().runRenderLoop(() => {
-      scene.render();
-    });
+  private setGameState(state: GameState) {
+    this.gameState = state;
   }
+
+  async run() {
+    if (this.gameState === GameState.Uninitialized) {
+      this.setGameState(GameState.Loading);
+      this.enterXRButton?.addEventListener('click', () => {
+        this.enterXR();
+      })
+
+      const scene = await this.createScene(<HTMLElement>this.canvas);
+
+      scene.getEngine().runRenderLoop(() => {
+        scene.render();
+      });
+
+      this.setGameState(GameState.Main);
+    }
+  }
+
 }
 
 export default App;
