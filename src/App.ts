@@ -159,9 +159,9 @@ class App extends Emitter {
 
     camera.setTarget(new Vector3(0, 1.6, 0));
 
-    if (this.canvas !== null) {
+    if (canvas !== null) {
       console.log('Canvas found');
-      camera.attachControl(this.canvas, true);
+      camera.attachControl(canvas, true);
     }
     return camera;
   }
@@ -223,13 +223,11 @@ class App extends Emitter {
     light2.position = new Vector3(0, 5, 5);
 
     const shadowGenerator = new ShadowGenerator(1024, light2);
-    shadowGenerator.useBlurExponentialShadowMap = true;
-    shadowGenerator.blurKernel = 32;
-    shadowGenerator.setDarkness(0.5);
+    // shadowGenerator.useBlurExponentialShadowMap = true;
+    // shadowGenerator.blurKernel = 32;
+    // shadowGenerator.setDarkness(0.5);
     // shadowGenerator.usePoissonSampling = true;
     // shadowGenerator.getShadowMap().renderList.push(mesh);
-    // shadowGenerator.useExponentialShadowMap = true;
-    // shadowGenerator.useBlurExponentialShadowMap = true;
 
     scene.meshes.forEach(mesh => {
       if (mesh.name.endsWith(this.hasShadowSuffix)) {
@@ -248,11 +246,10 @@ class App extends Emitter {
     } catch (error) {
       alert('Error getting microphone. Sound input disabled. ' + error);
     }
-    
+
     try {
       await this.xrHelper?.baseExperience
         .enterXRAsync('immersive-vr', 'local-floor');
-      
     } catch (error) {
       alert('Error entering VR mode. ' + error);
     }
@@ -269,7 +266,7 @@ class App extends Emitter {
     if (ground !== null) {
       XRExperienceOptions.floorMeshes = [ground];
     }
- 
+
     const xrHelper = await scene.createDefaultXRExperienceAsync(XRExperienceOptions);
     // engine.setHardwareScalingLevel(0.25); 
     if (xrHelper.baseExperience) {
@@ -341,26 +338,26 @@ class App extends Emitter {
     //  console.log(newScene);
     ///  newScene.animate();
     //});
-    const importedMesh = await SceneLoader.ImportMeshAsync('', this.objectsFolder, 'rooom.gltf', scene);
-    
+    // const importedMesh = await SceneLoader.ImportMeshAsync('', this.objectsFolder, 'rooom.gltf', scene);
+
 
     // this.enableScenePhysics(scene);
     // ground = this.addWorld(scene);
     this.addcamera(scene, this.canvas);
 
-  
+
     // this.addBullets(scene);
     // this.removeBullets(scene);
     const sphere = MeshBuilder.CreateSphere(`sphere${this.hasShadowSuffix}`,
       { diameter: 1, segments: 32 }, scene);
-      /*
-    sphere.physicsImpostor = new PhysicsImpostor(
-      sphere,
-      PhysicsImpostor.SphereImpostor,
-      { mass: 0.2 },
-      scene
-    );
-    */
+    /*
+  sphere.physicsImpostor = new PhysicsImpostor(
+    sphere,
+    PhysicsImpostor.SphereImpostor,
+    { mass: 0.2 },
+    scene
+  );
+  */
     sphere.material = this.addStandardMaterial(scene, '#ff0000', true, 'sphMat');
     sphere.receiveShadows = true;
     sphere.position.y = 2;
@@ -380,21 +377,23 @@ class App extends Emitter {
     button1.fontSize = 50;
     button1.background = "green";
     button1.onPointerUpObservable.add(() => {
-      if(this.gameState === GameState.Loading) {
+      if (this.gameState === GameState.Loading) {
         this.setGameState(GameState.Main);
-       } else {
-         this.setGameState(GameState.Loading);
-       }
-       console.log(scene);
+      } else {
+        this.setGameState(GameState.Loading);
+      }
+      console.log(scene);
     });
     advancedTexture.addControl(button1);
 
+    this.addLightsAndShadows(scene);
 
-   this.addLightsAndShadows(scene);
+
     scene.onPointerObservable.add((event) => {
       if (event.type == PointerEventTypes.POINTERDOWN) {
       }
     });
+
     return scene;
   }
 
@@ -404,6 +403,7 @@ class App extends Emitter {
 
   private async createLoadingScene(engine: Engine) {
     const scene = new Scene(engine);
+
     scene.clearColor = new Color4(1, 1, 1, 0);
     this.addcamera(scene);
 
@@ -433,24 +433,20 @@ class App extends Emitter {
       })
 
       const engine = new Engine(<Nullable<HTMLCanvasElement>>this.canvas, true);
+      const scenes: Scene[] = [];
 
       this.setGameState(GameState.Loading);
 
       engine.runRenderLoop(() => {
-        if(scenes[this.gameState]) {
-          scenes[this.gameState].render();
-        }
+        if (scenes[this.gameState]) {
+          scenes[this.gameState].render()
+        };
       });
 
-      const scenes: Scene[] = [];
       scenes[GameState.Loading] = await this.createLoadingScene(engine);
       scenes[GameState.Main] = await this.createMainScene(engine);
-
       this.xrHelper = await this.setupXR(scenes[GameState.Main]);
-      
       this.setGameState(GameState.Main);
-
-
     }
   }
 
