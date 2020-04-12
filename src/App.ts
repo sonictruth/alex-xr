@@ -36,7 +36,19 @@ const webXRPolyfill = new WebXRPolyfill();
 
 import texture from './images/texture.jpg';
 
-type GameState = 'main' | 'playing' | 'win' | 'lost' | 'loading';
+enum GameState {
+  Main,
+  Playing,
+  Win,
+  Lost,
+  Loading
+}
+
+enum MicrophoneSensivity {
+  Low = 60,
+  Medium = 30,
+  High = 10
+}
 
 class App extends Emitter {
   private canvas: HTMLElement | null = null;
@@ -46,13 +58,20 @@ class App extends Emitter {
   private bullets: Mesh[] = [];
   private bulletIndex: number = 0;
 
-  private microphoneSensivity: number = 10;
+  private microphoneSensivity: MicrophoneSensivity
+    = MicrophoneSensivity.High;
 
-  private gameState: GameState = 'loading';
+  private gameState = GameState.Loading;
 
-  constructor(canvas: HTMLElement | null, enterXRButton: HTMLElement | null) {
+  constructor(
+    canvas: HTMLElement | null,
+    enterXRButton: HTMLElement | null
+  ) {
     super();
     this.canvas = canvas;
+    enterXRButton?.addEventListener('click', () => {
+      this.enterXR();
+    })
   }
 
   private async startListeningforMicrophoneInput() {
@@ -247,7 +266,7 @@ class App extends Emitter {
       await this.xrHelper?.baseExperience
         .enterXRAsync('immersive-vr', 'local-floor');
     } catch (error) {
-      alert('Error initializing: ' + error);
+      alert(error);
     }
   }
 
@@ -314,7 +333,7 @@ class App extends Emitter {
     sphere.position.x = 0;
     //////
     scene.onPointerObservable.add((event) => {
-      if(event.type == PointerEventTypes.POINTERDOWN) {
+      if (event.type == PointerEventTypes.POINTERDOWN) {
         this.throwBullet();
       }
     });
@@ -323,9 +342,8 @@ class App extends Emitter {
   }
 
   async run() {
-    this.gameState = 'loading';
     const scene = await this.createScene(<HTMLElement>this.canvas);
-    this.gameState = 'main';
+    this.gameState = GameState.Main;
     scene.getEngine().runRenderLoop(() => {
       scene.render();
     });
