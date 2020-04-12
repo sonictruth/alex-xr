@@ -1,20 +1,22 @@
 {
   "name": "alex-xr",
   "version": "1.0.0",
-  "description": "Web XR using Babylon.JS, TypeScript, Parcel",
+  "description": "WebXR using Babylon.JS, TypeScript, Parcel",
   "main": "index.html",
   "scripts": {
     "prebuild": "shx rm -rf dist/*",
-    "start": "parcel index.html --open",
+    "prestart": "shx rm -rf .cache",
+    "start": "parcel serve index.html --open --no-source-maps",
     "build": "parcel build index.html --public-url ./",
     "deploy": "npm run build; gh-pages --dist dist;"
   },
   "dependencies": {
     "@babylonjs/core": "^4.1.0",
     "@babylonjs/gui": "^4.1.0",
+    "@babylonjs/inspector": "^4.1.0",
     "@babylonjs/loaders": "^4.1.0",
     "ammo.js": "0.0.10",
-    "cannon": "^0.6.2"
+    "webxr-polyfill": "^2.0.2"
   },
   "keywords": [
     "typescript",
@@ -24,8 +26,9 @@
   "devDependencies": {
     "@types/ammo.js": "github:osman-turan/ammo.js-typings",
     "@types/cannon": "^0.1.4",
+    "@types/react": "^16.9.34",
     "gh-pages": "^2.2.0",
-    "parcel-bundler": "^1.12.4",
+    "parcel": "latest",
     "shx": "^0.3.2",
     "typescript": "^3.8.3"
   }
