@@ -1,33 +1,23 @@
 import {
   AmmoJSPlugin,
   Vector3,
-  Analyser,
-  Sound,
   WebXRState,
   ShadowGenerator,
   Color3,
   Color4,
   Mesh,
-  PointerEventTypes,
-  AbstractMesh,
-  CubeTexture,
   PhysicsImpostor,
   MeshBuilder,
   Nullable,
   HemisphericLight,
-  Texture,
   StandardMaterial,
   Engine,
   Scene,
   UniversalCamera,
   WebXRDefaultExperienceOptions,
   DirectionalLight,
-  PhysicsImpostorParameters,
-  SpotLight,
-  PointLight,
   WebXRDefaultExperience,
-  AssetsManager,
-  SceneLoader
+  Animation
 } from '@babylonjs/core';
 import '@babylonjs/loaders';
 import * as GUI from '@babylonjs/gui';
@@ -39,7 +29,7 @@ new WebXRPolyfill();
 enum GameState {
   Uninitialized,
   Loading,
-  Main,
+  MainMenu,
   Playing,
   End,
 }
@@ -49,7 +39,6 @@ enum MicrophoneSensivity {
   Medium = 30,
   High = 10
 }
-
 class App extends Emitter {
   private canvas: HTMLElement | null = null;
   private enterXRButton: HTMLElement | null = null;
@@ -294,7 +283,7 @@ class App extends Emitter {
     const envHelper = scene.createDefaultEnvironment({
       skyboxColor: Color3.White(),
       groundColor: Color3.White(),
-      skyboxTexture: './TropicalSunnyDay',
+      skyboxTexture: './images/TropicalSunnyDay',
       skyboxSize: worldSize,
       groundSize: worldSize,
       enableGroundShadow: true
@@ -326,74 +315,34 @@ class App extends Emitter {
     return ground;
   }
 
-  private async createMainScene(engine: Engine) {
+  private async createMainMenuScene(engine: Engine) {
     const scene = new Scene(engine);
     scene.clearColor = new Color4(1, 1, 1, 0);
+    this.addEnvitoment(scene);
+    var manager = new GUI.GUI3DManager(scene);
 
-    // const assetsManager = new AssetsManager(scene);
-    // assetsManager.addMeshTask('skull task', '', 'scenes/', 'skull.babylon');
-    // SceneLoader.LoadAsync()
-    // vs ImportMesh
-    //SceneLoader.Append(this.objectsFolder, 'rooom.gltf', scene, (newScene)=> {
-    //  console.log(newScene);
-    ///  newScene.animate();
-    //});
-    // const importedMesh = await SceneLoader.ImportMeshAsync('', this.objectsFolder, 'rooom.gltf', scene);
+    // Let's add a button
+    const m = MeshBuilder.CreateSphere('a', { diameter: 1 });
+    const buttons = new GUI.MeshButton3D(m, '')
+    buttons.position.z = 2
+    ;
+    var button = new GUI.HolographicButton('start');
+    manager.addControl(button);
+    manager.addControl(buttons);
+    // button.linkToTransformNode(anchor);
+    button.position.z = 4;
+    button.tooltipText = 'Starts the game';
+    button.text = 'START';
+    button.onPointerUpObservable.add(() => {
 
-
-    // this.enableScenePhysics(scene);
-    // ground = this.addWorld(scene);
-    this.addcamera(scene, this.canvas);
-
-
-    // this.addBullets(scene);
-    // this.removeBullets(scene);
-    const sphere = MeshBuilder.CreateSphere(`sphere${this.hasShadowSuffix}`,
-      { diameter: 1, segments: 32 }, scene);
-    /*
-  sphere.physicsImpostor = new PhysicsImpostor(
-    sphere,
-    PhysicsImpostor.SphereImpostor,
-    { mass: 0.2 },
-    scene
-  );
-  */
-    sphere.material = this.addStandardMaterial(scene, '#ff0000', true, 'sphMat');
-    sphere.receiveShadows = true;
-    sphere.position.y = 2;
-    sphere.position.x = 0;
-    //////
-
-    const plane = MeshBuilder.CreatePlane('plane', { size: 2 });
-    plane.parent = sphere;
-    plane.position.y = 2;
-
-    const advancedTexture = GUI.AdvancedDynamicTexture.CreateForMesh(plane);
-
-    const button1 = GUI.Button.CreateSimpleButton("but1", "Click Me");
-    button1.width = 1;
-    button1.height = 0.4;
-    button1.color = "white";
-    button1.fontSize = 50;
-    button1.background = "green";
-    button1.onPointerUpObservable.add(() => {
-      if (this.gameState === GameState.Loading) {
-        this.setGameState(GameState.Main);
-      } else {
-        this.setGameState(GameState.Loading);
-      }
-      console.log(scene);
     });
-    advancedTexture.addControl(button1);
 
     this.addLightsAndShadows(scene);
-
-
-    scene.onPointerObservable.add((event) => {
-      if (event.type == PointerEventTypes.POINTERDOWN) {
-      }
-    });
-
+    const camera = this.addcamera(scene, this.canvas);
+    camera.rotation.y = 0.01;
+    await new Promise((resolve) => {
+      setTimeout(()=> resolve(), 9000);
+    })
     return scene;
   }
 
@@ -406,22 +355,43 @@ class App extends Emitter {
 
     scene.clearColor = new Color4(1, 1, 1, 0);
     this.addcamera(scene);
-
-    const plane = MeshBuilder.CreatePlane('plane', { size: 10 });
-    plane.position.y = 1.6;
-    const advancedTexture = GUI.AdvancedDynamicTexture.CreateForMesh(plane, 1024, 1024);
-    const rectangle = new GUI.Rectangle('rect');
-
-    var text1 = new GUI.TextBlock('text1');
-    text1.fontFamily = "Helvetica";
-    text1.textWrapping = true;
-
-    text1.text = 'Loading...'
-    text1.color = 'black';
-    text1.fontSize = '14px';
-
+  
+    const plane = MeshBuilder.CreatePlane('plane', { size: 3, });
+    plane.position.y = 3;
+    const advancedTexture = GUI.AdvancedDynamicTexture.CreateForMesh(plane, 800, 800);
+    const rectangle = new GUI.Rectangle();
+    const text1 = new GUI.TextBlock();
+    text1.text = 'please wait...';
     rectangle.addControl(text1);
     advancedTexture.addControl(rectangle);
+
+    const box = MeshBuilder.CreateSphere('box', { diameter: 2, segments: 2 });
+    box.material = this.addStandardMaterial(scene, '#000000');
+    box.material.wireframe = true;
+
+    box.position.y = 1.6;
+    box.position.z = 0;
+    const animationBox = new Animation(
+      'loadingAnimation',
+      'rotation.y',
+      30,
+      Animation.ANIMATIONTYPE_FLOAT,
+      Animation.ANIMATIONLOOPMODE_CYCLE
+    );
+    // animationBox.enableBlending = true;
+    // animationBox.blendingSpeed = 0.01;
+    animationBox.setKeys([{
+      frame: 0,
+      value: 0
+    }, {
+      frame: 60,
+      value: 1.5708
+    }]);
+    box.animations.push(animationBox);
+
+    this.addLightsAndShadows(scene);
+
+    scene.beginAnimation(box, 0, 60, true);
 
     return scene;
   }
@@ -433,6 +403,7 @@ class App extends Emitter {
       })
 
       const engine = new Engine(<Nullable<HTMLCanvasElement>>this.canvas, true);
+      engine.hideLoadingUI();
       const scenes: Scene[] = [];
 
       this.setGameState(GameState.Loading);
@@ -444,9 +415,9 @@ class App extends Emitter {
       });
 
       scenes[GameState.Loading] = await this.createLoadingScene(engine);
-      scenes[GameState.Main] = await this.createMainScene(engine);
-      this.xrHelper = await this.setupXR(scenes[GameState.Main]);
-      this.setGameState(GameState.Main);
+      scenes[GameState.MainMenu] = await this.createMainMenuScene(engine);
+      this.xrHelper = await this.setupXR(scenes[GameState.MainMenu]);
+      this.setGameState(GameState.MainMenu);
     }
   }
 
