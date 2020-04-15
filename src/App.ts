@@ -17,13 +17,15 @@ import {
   WebXRDefaultExperienceOptions,
   DirectionalLight,
   WebXRDefaultExperience,
-  Animation
+  Animation,
+  AbstractMesh
 } from '@babylonjs/core';
 import '@babylonjs/loaders';
 import * as GUI from '@babylonjs/gui';
 import Emitter from './Emitter';
 
 import WebXRPolyfill from 'webxr-polyfill';
+
 new WebXRPolyfill();
 
 enum GameState {
@@ -39,6 +41,7 @@ enum MicrophoneSensivity {
   Medium = 30,
   High = 10
 }
+
 class App extends Emitter {
   private canvas: HTMLElement | null = null;
   private enterXRButton: HTMLElement | null = null;
@@ -52,8 +55,11 @@ class App extends Emitter {
     = MicrophoneSensivity.High;
 
   private gameState: GameState = GameState.Uninitialized;
+  private previousGameState: GameState = GameState.Uninitialized;
 
   private hasShadowSuffix = '_hasShadow';
+  private onSceneEnterPrefix = 'onStateVisible_';
+  private onSceneExitPrefix = 'onStateHidden_';
   private objectsFolder = './objects/';
 
   constructor(
@@ -107,7 +113,11 @@ class App extends Emitter {
 
         const diff = avarageValue - lastAudioDiff;
         if (diff > this.microphoneSensivity) {
-          // this.throwBullet(diff / 10);
+          this.dispatchEvent(new CustomEvent('onSound', {
+            detail: {
+              value: diff
+            }
+          }));
         }
         lastAudioDiff = avarageValue
       };
@@ -149,7 +159,6 @@ class App extends Emitter {
     camera.setTarget(new Vector3(0, 1.6, 0));
 
     if (canvas !== null) {
-      console.log('Canvas found');
       camera.attachControl(canvas, true);
     }
     return camera;
@@ -275,7 +284,7 @@ class App extends Emitter {
     return xrHelper;
   }
 
-  private addEnvitoment(scene: Scene): Mesh | null {
+  private addEnvirooment(scene: Scene): Mesh | null {
     let ground = null;
     this.enableScenePhysics(scene);
 
@@ -315,62 +324,175 @@ class App extends Emitter {
     return ground;
   }
 
+  private addButton(
+    panel: GUI.StackPanel3D,
+    text: string,
+    size: number = 60
+  ): GUI.HolographicButton {
+    const button = new GUI.HolographicButton(text, true);
+
+    panel.addControl(button);
+
+    const text1 = new GUI.TextBlock()
+    //button.frontMaterial.innerGlowColor = Color3.FromHexString('#ff0000')
+    //button.backMaterial.albedoColor = Color3.Gray();
+    //button.frontMaterial.albedoColor = Color3.FromHexString('#ff0000')
+
+    text1.text = text;
+    text1.color = '#ffffff';
+    text1.fontSize = size;
+    button.content = text1;
+
+    return button;
+  }
+
+  private getMenuAnimation(): Animation {
+    const menuAnimation = new Animation(
+      'mainAnimation',
+      'rotation.x',
+      30,
+      Animation.ANIMATIONTYPE_FLOAT,
+      Animation.ANIMATIONLOOPMODE_CYCLE
+    );
+    menuAnimation.setKeys([{
+      frame: 0,
+      value: 1.8
+    }, {
+      frame: 30,
+      value: .9
+    }]);
+    return menuAnimation;
+  }
+
   private async createMainMenuScene(engine: Engine) {
     const scene = new Scene(engine);
-    scene.clearColor = new Color4(1, 1, 1, 0);
-    this.addEnvitoment(scene);
-    var manager = new GUI.GUI3DManager(scene);
 
-    // Let's add a button
-    const m = MeshBuilder.CreateSphere('a', { diameter: 1 });
-    const buttons = new GUI.MeshButton3D(m, '')
-    buttons.position.z = 2
-    ;
-    var button = new GUI.HolographicButton('start');
-    manager.addControl(button);
-    manager.addControl(buttons);
-    // button.linkToTransformNode(anchor);
-    button.position.z = 4;
-    button.tooltipText = 'Starts the game';
-    button.text = 'START';
-    button.onPointerUpObservable.add(() => {
-
-    });
-
+    scene.clearColor = new Color4(1, 1, 1, 1);
     this.addLightsAndShadows(scene);
-    const camera = this.addcamera(scene, this.canvas);
-    camera.rotation.y = 0.01;
+    this.addcamera(scene);
+
+    const manager = new GUI.GUI3DManager(scene);
+    const panel = new GUI.StackPanel3D();
+    manager.addControl(panel)
+    panel.margin = 0.02;
+
+    this.addButton(panel, 'Start')
+      .onPointerClickObservable.add(() => {
+        console.log('click');
+        this.setGameState(GameState.Playing)
+      }
+      );
+
+    const getMicriphoneButtonStringText = () => {
+      return 'Micophone \n' + MicrophoneSensivity[this.microphoneSensivity];
+    }
+
+    this.addButton(panel, getMicriphoneButtonStringText(), 20)
+      .onPointerClickObservable.add((position, event) => {
+        const micSensivityValues =
+          Object.values(MicrophoneSensivity).filter(key => typeof key === 'number');
+        const index = micSensivityValues.indexOf(this.microphoneSensivity);
+        this.microphoneSensivity =
+          <MicrophoneSensivity>micSensivityValues[index + 1] || micSensivityValues[0];
+        event.currentTarget.content.text = getMicriphoneButtonStringText();
+      });
+
+
+    const anchor = new AbstractMesh('anchor', scene);
+    panel.linkToTransformNode(anchor);
+    panel.position.y = 1;
+    anchor.animations.push(this.getMenuAnimation());
+
+
+    this.addSceneStateHandlers(
+      GameState.MainMenu,
+      () => {
+        if (manager.utilityLayer)
+          manager.utilityLayer.shouldRender = true;
+
+        scene.beginAnimation(anchor, 0, 30, false);
+      },
+      () => {
+        console.log('exit');
+        if (manager.utilityLayer)
+          manager.utilityLayer.shouldRender = false;
+      });
+
+    // Test loader
     await new Promise((resolve) => {
-      setTimeout(()=> resolve(), 9000);
+      setTimeout(() => resolve(), 1000);
     })
     return scene;
   }
 
-  private setGameState(state: GameState) {
-    this.gameState = state;
+
+  private async createEndScene(engine: Engine) {
+    const scene = new Scene(engine);
+    scene.clearColor = new Color4(1, 1, 1, 1);
+
+    this.addcamera(scene);
+    this.addLightsAndShadows(scene);
+
+    const manager = new GUI.GUI3DManager(scene);
+    const panel = new GUI.StackPanel3D();
+    manager.addControl(panel)
+    panel.margin = 0.02;
+
+    if (manager.utilityLayer)
+      manager.utilityLayer.shouldRender = false;
+
+    const anchor = new AbstractMesh('anchor', scene);
+    panel.linkToTransformNode(anchor);
+    panel.position.y = 1;
+    anchor.animations.push(this.getMenuAnimation());
+    this.addButton(panel, 'OK', 100)
+      .onPointerClickObservable.add(() => {
+        this.setGameState(GameState.MainMenu)
+      }
+      );
+    this.addSceneStateHandlers(
+      GameState.End,
+      () => {
+        scene.beginAnimation(anchor, 0, 30, false);
+        if (manager.utilityLayer)
+          manager.utilityLayer.shouldRender = true;
+      },
+      () => {
+        if (manager.utilityLayer)
+          manager.utilityLayer.shouldRender = false;
+      });
+    return scene;
+  }
+
+  private async createPlayingScene(engine: Engine) {
+    const scene = new Scene(engine);
+    scene.clearColor = new Color4(1, 0, 1, 1);
+    MeshBuilder.CreateBox('box', { size: 1 }, scene).position = new Vector3(0, 2, 1);
+    this.addLightsAndShadows(scene);
+    this.addcamera(scene, this.canvas);
+
+    this.addEventListener(`${this.onSceneEnterPrefix}${GameState.Playing}`,
+      (event) => {
+        setTimeout(() => {
+          this.setGameState(GameState.End);
+        }, 5000)
+      });
+    return scene;
   }
 
   private async createLoadingScene(engine: Engine) {
     const scene = new Scene(engine);
 
-    scene.clearColor = new Color4(1, 1, 1, 0);
+    scene.clearColor = new Color4(1, 1, 1, 1);
     this.addcamera(scene);
-  
-    const plane = MeshBuilder.CreatePlane('plane', { size: 3, });
-    plane.position.y = 3;
-    const advancedTexture = GUI.AdvancedDynamicTexture.CreateForMesh(plane, 800, 800);
-    const rectangle = new GUI.Rectangle();
-    const text1 = new GUI.TextBlock();
-    text1.text = 'please wait...';
-    rectangle.addControl(text1);
-    advancedTexture.addControl(rectangle);
 
-    const box = MeshBuilder.CreateSphere('box', { diameter: 2, segments: 2 });
-    box.material = this.addStandardMaterial(scene, '#000000');
-    box.material.wireframe = true;
+    const sphere = MeshBuilder.CreateSphere('sphere1', { diameter: 2, segments: 2 }, scene);
+    sphere.material = this.addStandardMaterial(scene, '#000000');
+    sphere.material.wireframe = true;
 
-    box.position.y = 1.6;
-    box.position.z = 0;
+    sphere.position.y = 1.6;
+    sphere.position.z = 0;
+
     const animationBox = new Animation(
       'loadingAnimation',
       'rotation.y',
@@ -378,8 +500,6 @@ class App extends Emitter {
       Animation.ANIMATIONTYPE_FLOAT,
       Animation.ANIMATIONLOOPMODE_CYCLE
     );
-    // animationBox.enableBlending = true;
-    // animationBox.blendingSpeed = 0.01;
     animationBox.setKeys([{
       frame: 0,
       value: 0
@@ -387,13 +507,31 @@ class App extends Emitter {
       frame: 60,
       value: 1.5708
     }]);
-    box.animations.push(animationBox);
+    sphere.animations.push(animationBox);
+    scene.beginAnimation(sphere, 0, 60, true);
 
     this.addLightsAndShadows(scene);
 
-    scene.beginAnimation(box, 0, 60, true);
-
     return scene;
+  }
+
+  private addSceneStateHandlers(
+    state: GameState,
+    onEnter: EventListener,
+    onExit: EventListener): void {
+    this.addEventListener(`${this.onSceneEnterPrefix}${state}`, onEnter);
+    this.addEventListener(`${this.onSceneExitPrefix}${state}`, onExit);
+  }
+
+  private setGameState(state: GameState) {
+    this.dispatchEvent(
+      new CustomEvent(`${this.onSceneExitPrefix}${this.previousGameState}`)
+    )
+    this.gameState = state;
+    this.dispatchEvent(
+      new CustomEvent(`${this.onSceneEnterPrefix}${state}`)
+    )
+    this.previousGameState = state;
   }
 
   async run() {
@@ -411,11 +549,15 @@ class App extends Emitter {
       engine.runRenderLoop(() => {
         if (scenes[this.gameState]) {
           scenes[this.gameState].render()
+        } else {
+          throw Error('Missing scene');
         };
       });
 
       scenes[GameState.Loading] = await this.createLoadingScene(engine);
       scenes[GameState.MainMenu] = await this.createMainMenuScene(engine);
+      scenes[GameState.Playing] = await this.createPlayingScene(engine);
+      scenes[GameState.End] = await this.createEndScene(engine);
       this.xrHelper = await this.setupXR(scenes[GameState.MainMenu]);
       this.setGameState(GameState.MainMenu);
     }
