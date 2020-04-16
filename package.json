@@ -6,7 +6,7 @@
   "scripts": {
     "prebuild": "shx rm -rf dist/*",
     "prestart": "shx rm -rf .cache",
-    "start": "parcel serve index.html --no-source-maps --open ",
+    "start": "parcel serve index.html --no-source-maps --https --open ",
     "build": "parcel build index.html --no-source-maps --public-url ./",
     "deploy": "npm run build; gh-pages --dist dist;"
   },

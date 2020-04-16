@@ -17,20 +17,23 @@ import {
   WebXRDefaultExperienceOptions,
   DirectionalLight,
   WebXRDefaultExperience,
-  Animation,
-  AbstractMesh
+  TransformNode,
+  Texture,
+  AssetsManager,
+  PostProcess,
+  Effect,
+  EventState
 } from '@babylonjs/core';
 import '@babylonjs/loaders';
 import * as GUI from '@babylonjs/gui';
 import Emitter from './Emitter';
+import LoadingScreen from './LoadingScreen';
 
 import WebXRPolyfill from 'webxr-polyfill';
 
 new WebXRPolyfill();
 
-enum GameState {
-  Uninitialized,
-  Loading,
+enum GameView {
   MainMenu,
   Playing,
   End,
@@ -44,6 +47,7 @@ enum MicrophoneSensivity {
 
 class App extends Emitter {
   private canvas: HTMLElement | null = null;
+  private scene: Scene | null = null;
   private enterXRButton: HTMLElement | null = null;
   private xrHelper: WebXRDefaultExperience | null = null;
 
@@ -54,12 +58,14 @@ class App extends Emitter {
   private microphoneSensivity: MicrophoneSensivity
     = MicrophoneSensivity.High;
 
-  private gameState: GameState = GameState.Uninitialized;
-  private previousGameState: GameState = GameState.Uninitialized;
+  private gameViewID: GameView | null = null;
+  private previousGameViewID: GameView | null = null;
+
+  private gameViews: TransformNode[] = [];
 
   private hasShadowSuffix = '_hasShadow';
-  private onSceneEnterPrefix = 'onStateVisible_';
-  private onSceneExitPrefix = 'onStateHidden_';
+  private onViewEnterPrefix = 'onStateVisible_';
+  private onViewExit = 'onStateHidden_';
   private objectsFolder = './objects/';
 
   constructor(
@@ -213,23 +219,19 @@ class App extends Emitter {
 
   private addLightsAndShadows(scene: Scene): void {
 
-    const light = new HemisphericLight("light1", new Vector3(0, 1, 0), scene);
-    light.intensity = 0.6;
-    light.specular = Color3.Black();
+    const light = new HemisphericLight('light1', new Vector3(0, 1, 0), scene);
+    light.intensity = 1;
+    light.specular = Color3.White();
 
-    const light2 = new DirectionalLight("dir01", new Vector3(0, -0.5, -1.0), scene);
+    const light2 = new DirectionalLight('light2', new Vector3(0, -0.5, -1.0), scene);
     light2.position = new Vector3(0, 5, 5);
+    light2.intensity = 1;
 
     const shadowGenerator = new ShadowGenerator(1024, light2);
-    // shadowGenerator.useBlurExponentialShadowMap = true;
-    // shadowGenerator.blurKernel = 32;
-    // shadowGenerator.setDarkness(0.5);
-    // shadowGenerator.usePoissonSampling = true;
-    // shadowGenerator.getShadowMap().renderList.push(mesh);
+
 
     scene.meshes.forEach(mesh => {
       if (mesh.name.endsWith(this.hasShadowSuffix)) {
-        console.log('shadow enabled for' + mesh.name)
         shadowGenerator.addShadowCaster(mesh);
         mesh.receiveShadows = true;
       }
@@ -248,6 +250,7 @@ class App extends Emitter {
     try {
       await this.xrHelper?.baseExperience
         .enterXRAsync('immersive-vr', 'local-floor');
+
     } catch (error) {
       alert('Error entering VR mode. ' + error);
     }
@@ -255,13 +258,16 @@ class App extends Emitter {
 
   private async setupXR(scene: Scene, groundMashName: string = 'ground')
     : Promise<WebXRDefaultExperience> {
+
     const engine = scene.getEngine();
     const XRExperienceOptions: WebXRDefaultExperienceOptions = {
       disableDefaultUI: true,
       disableTeleportation: true
     };
-    const ground = scene.getMeshByName('groundMashName');
+
+    const ground = scene.getMeshByName('BackgroundPlane');
     if (ground !== null) {
+      console.log('setupXR found ground');
       XRExperienceOptions.floorMeshes = [ground];
     }
 
@@ -269,9 +275,7 @@ class App extends Emitter {
     // engine.setHardwareScalingLevel(0.25); 
     if (xrHelper.baseExperience) {
       xrHelper.baseExperience.onStateChangedObservable.add((state) => {
-
-        if (state === WebXRState.IN_XR ||
-          state === WebXRState.NOT_IN_XR) {
+        if (state === WebXRState.IN_XR || state === WebXRState.NOT_IN_XR) {
           engine.resize();
         }
       });
@@ -281,18 +285,31 @@ class App extends Emitter {
 
     xrHelper.pointerSelection.displayLaserPointer = false;
     xrHelper.pointerSelection.disablePointerLighting = false;
+    // xrHelper.baseExperience.sessionManager.scene
+    // xrHelper.renderTarget = new WebXRRenderTarget()
     return xrHelper;
   }
 
-  private addEnvirooment(scene: Scene): Mesh | null {
+  private async addEnv(scene: Scene): Promise<Mesh | null> {
     let ground = null;
     this.enableScenePhysics(scene);
 
-    const worldSize = 30;
+    let skyBoxTexture;
+    const assetsManager = new AssetsManager(scene);
+    const task = assetsManager
+      .addCubeTextureTask('sky', './images/TropicalSunnyDay');
+
+    task.onSuccess = (task) => {
+      skyBoxTexture = task.texture;
+      skyBoxTexture.coordinatesMode = Texture.SKYBOX_MODE;
+    }
+    await assetsManager.loadAsync();
+
+    const worldSize = 1000;
     const envHelper = scene.createDefaultEnvironment({
       skyboxColor: Color3.White(),
       groundColor: Color3.White(),
-      skyboxTexture: './images/TropicalSunnyDay',
+      skyboxTexture: skyBoxTexture,
       skyboxSize: worldSize,
       groundSize: worldSize,
       enableGroundShadow: true
@@ -301,7 +318,6 @@ class App extends Emitter {
     if (envHelper !== null &&
       envHelper.ground !== null &&
       envHelper.skybox !== null) {
-      // envHelper.setMainColor(Color3.Teal());
 
       ground = envHelper.ground;
       ground.parent = null;
@@ -324,245 +340,228 @@ class App extends Emitter {
     return ground;
   }
 
-  private addButton(
-    panel: GUI.StackPanel3D,
-    text: string,
-    size: number = 60
-  ): GUI.HolographicButton {
-    const button = new GUI.HolographicButton(text, true);
+  private addGui(
+    root: TransformNode,
+    buttons: { text: string, textSize: number, handler: Function, }[]
+  ): Mesh {
 
-    panel.addControl(button);
+    const guiPlane = Mesh.CreatePlane('plane', 2, root.getScene());
+    guiPlane.parent = root;
+    guiPlane.position.y = 2;
 
-    const text1 = new GUI.TextBlock()
-    //button.frontMaterial.innerGlowColor = Color3.FromHexString('#ff0000')
-    //button.backMaterial.albedoColor = Color3.Gray();
-    //button.frontMaterial.albedoColor = Color3.FromHexString('#ff0000')
+    const advancedTexture = GUI.AdvancedDynamicTexture.CreateForMesh(guiPlane);
+    const panel = new GUI.StackPanel();
 
-    text1.text = text;
-    text1.color = '#ffffff';
-    text1.fontSize = size;
-    button.content = text1;
+    advancedTexture.addControl(panel);
 
-    return button;
+    buttons.forEach((button, index) => {
+      const guiButton = GUI.Button.CreateSimpleButton(`button${index}`, button.text);
+      guiButton.paddingTop = 20;
+      guiButton.height = '200px';
+      guiButton.fontSize = button.textSize;
+      guiButton.width = '400px';
+      guiButton.color = 'Gray';
+      guiButton.background = 'White';
+      guiButton.thickness = 1;
+      guiButton.cornerRadius = 50;
+      // guiButton.fontFamily = 'Curier';
+      guiButton.onPointerClickObservable.add((vector, event) => button.handler(event))
+      panel.addControl(guiButton);
+    })
+    return guiPlane;
   }
+  private async createMainMenuView(scene: Scene): Promise<TransformNode> {
+    const root = new TransformNode('main');
+    root.setEnabled(false);
 
-  private getMenuAnimation(): Animation {
-    const menuAnimation = new Animation(
-      'mainAnimation',
-      'rotation.x',
-      30,
-      Animation.ANIMATIONTYPE_FLOAT,
-      Animation.ANIMATIONLOOPMODE_CYCLE
-    );
-    menuAnimation.setKeys([{
-      frame: 0,
-      value: 1.8
-    }, {
-      frame: 30,
-      value: .9
-    }]);
-    return menuAnimation;
-  }
-
-  private async createMainMenuScene(engine: Engine) {
-    const scene = new Scene(engine);
-
-    scene.clearColor = new Color4(1, 1, 1, 1);
-    this.addLightsAndShadows(scene);
-    this.addcamera(scene);
-
-    const manager = new GUI.GUI3DManager(scene);
-    const panel = new GUI.StackPanel3D();
-    manager.addControl(panel)
-    panel.margin = 0.02;
-
-    this.addButton(panel, 'Start')
-      .onPointerClickObservable.add(() => {
-        console.log('click');
-        this.setGameState(GameState.Playing)
-      }
-      );
 
     const getMicriphoneButtonStringText = () => {
-      return 'Micophone \n' + MicrophoneSensivity[this.microphoneSensivity];
+      return 'Micophone\sensitivity\n' + MicrophoneSensivity[this.microphoneSensivity];
     }
+    this.addGui(root,
+      [
+        {
+          text: 'Start',
+          textSize: 60,
+          handler: () => this.setGameView(GameView.Playing)
+        },
+        {
+          text: getMicriphoneButtonStringText(),
+          textSize: 40,
+          handler: (event: EventState) => {
+            const micSensivityValues =
+              Object.values(MicrophoneSensivity).filter(key => typeof key === 'number');
+            const index = micSensivityValues.indexOf(this.microphoneSensivity);
+            this.microphoneSensivity =
+              <MicrophoneSensivity>micSensivityValues[index + 1] || micSensivityValues[0];
+            const button = <GUI.Button>event.target;
+            if (button.textBlock)
+              button.textBlock.text = getMicriphoneButtonStringText();;
+          }
+        }
+      ]);
 
-    this.addButton(panel, getMicriphoneButtonStringText(), 20)
-      .onPointerClickObservable.add((position, event) => {
-        const micSensivityValues =
-          Object.values(MicrophoneSensivity).filter(key => typeof key === 'number');
-        const index = micSensivityValues.indexOf(this.microphoneSensivity);
-        this.microphoneSensivity =
-          <MicrophoneSensivity>micSensivityValues[index + 1] || micSensivityValues[0];
-        event.currentTarget.content.text = getMicriphoneButtonStringText();
-      });
 
 
-    const anchor = new AbstractMesh('anchor', scene);
-    panel.linkToTransformNode(anchor);
-    panel.position.y = 1;
-    anchor.animations.push(this.getMenuAnimation());
+    const sphere = MeshBuilder.CreateSphere('s', { diameter: 2 })
+    sphere.parent = root;
+    sphere.position.y = 1;
+    sphere.position.z = .5;
 
 
-    this.addSceneStateHandlers(
-      GameState.MainMenu,
-      () => {
-        if (manager.utilityLayer)
-          manager.utilityLayer.shouldRender = true;
-
-        scene.beginAnimation(anchor, 0, 30, false);
-      },
-      () => {
-        console.log('exit');
-        if (manager.utilityLayer)
-          manager.utilityLayer.shouldRender = false;
-      });
-
-    // Test loader
-    await new Promise((resolve) => {
-      setTimeout(() => resolve(), 1000);
-    })
-    return scene;
+    return root;
   }
 
 
-  private async createEndScene(engine: Engine) {
-    const scene = new Scene(engine);
-    scene.clearColor = new Color4(1, 1, 1, 1);
+  private async createEndView(scene: Scene): Promise<TransformNode> {
+    const root = new TransformNode('End');
+    root.setEnabled(false);
 
-    this.addcamera(scene);
-    this.addLightsAndShadows(scene);
-
-    const manager = new GUI.GUI3DManager(scene);
-    const panel = new GUI.StackPanel3D();
-    manager.addControl(panel)
-    panel.margin = 0.02;
-
-    if (manager.utilityLayer)
-      manager.utilityLayer.shouldRender = false;
-
-    const anchor = new AbstractMesh('anchor', scene);
-    panel.linkToTransformNode(anchor);
-    panel.position.y = 1;
-    anchor.animations.push(this.getMenuAnimation());
-    this.addButton(panel, 'OK', 100)
-      .onPointerClickObservable.add(() => {
-        this.setGameState(GameState.MainMenu)
+    this.addGui(root, [{
+      text: 'OK',
+      textSize: 50,
+      handler: () => {
+        this.setGameView(GameView.MainMenu);
       }
-      );
-    this.addSceneStateHandlers(
-      GameState.End,
-      () => {
-        scene.beginAnimation(anchor, 0, 30, false);
-        if (manager.utilityLayer)
-          manager.utilityLayer.shouldRender = true;
-      },
-      () => {
-        if (manager.utilityLayer)
-          manager.utilityLayer.shouldRender = false;
-      });
-    return scene;
+    }
+    ])
+
+    return root;
   }
 
-  private async createPlayingScene(engine: Engine) {
-    const scene = new Scene(engine);
-    scene.clearColor = new Color4(1, 0, 1, 1);
-    MeshBuilder.CreateBox('box', { size: 1 }, scene).position = new Vector3(0, 2, 1);
-    this.addLightsAndShadows(scene);
-    this.addcamera(scene, this.canvas);
+  private async createPlayingView(scene: Scene): Promise<TransformNode> {
+    const root = new TransformNode('Playing');
+    root.setEnabled(false);
+    const box = MeshBuilder.CreateBox('box', { size: 1 }, scene)
+    box.position = new Vector3(0, 2, 1);
+    box.parent = root;
 
-    this.addEventListener(`${this.onSceneEnterPrefix}${GameState.Playing}`,
+
+    this.addEventListener(`${this.onViewEnterPrefix}${GameView.Playing}`,
       (event) => {
         setTimeout(() => {
-          this.setGameState(GameState.End);
+          this.setGameView(GameView.End);
         }, 5000)
       });
-    return scene;
+    return root;
   }
 
-  private async createLoadingScene(engine: Engine) {
-    const scene = new Scene(engine);
-
-    scene.clearColor = new Color4(1, 1, 1, 1);
-    this.addcamera(scene);
-
-    const sphere = MeshBuilder.CreateSphere('sphere1', { diameter: 2, segments: 2 }, scene);
-    sphere.material = this.addStandardMaterial(scene, '#000000');
-    sphere.material.wireframe = true;
-
-    sphere.position.y = 1.6;
-    sphere.position.z = 0;
-
-    const animationBox = new Animation(
-      'loadingAnimation',
-      'rotation.y',
-      30,
-      Animation.ANIMATIONTYPE_FLOAT,
-      Animation.ANIMATIONLOOPMODE_CYCLE
-    );
-    animationBox.setKeys([{
-      frame: 0,
-      value: 0
-    }, {
-      frame: 60,
-      value: 1.5708
-    }]);
-    sphere.animations.push(animationBox);
-    scene.beginAnimation(sphere, 0, 60, true);
-
-    this.addLightsAndShadows(scene);
-
-    return scene;
-  }
-
-  private addSceneStateHandlers(
-    state: GameState,
+  private addViewHandlers(
+    state: GameView,
     onEnter: EventListener,
     onExit: EventListener): void {
-    this.addEventListener(`${this.onSceneEnterPrefix}${state}`, onEnter);
-    this.addEventListener(`${this.onSceneExitPrefix}${state}`, onExit);
+    this.addEventListener(`${this.onViewEnterPrefix}${state}`, onEnter);
+    this.addEventListener(`${this.onViewExit}${state}`, onExit);
   }
 
-  private setGameState(state: GameState) {
-    this.dispatchEvent(
-      new CustomEvent(`${this.onSceneExitPrefix}${this.previousGameState}`)
-    )
-    this.gameState = state;
-    this.dispatchEvent(
-      new CustomEvent(`${this.onSceneEnterPrefix}${state}`)
-    )
-    this.previousGameState = state;
+  private async setGameView(id: GameView) {
+    const previousGameViewID = this.previousGameViewID;
+
+    if (previousGameViewID !== null && this.gameViews[previousGameViewID]) {
+      await this.fadeCamera();
+      this.dispatchEvent(
+        new CustomEvent(`${this.onViewExit}${previousGameViewID}`)
+      )
+      this.gameViews[previousGameViewID].setEnabled(false);
+    }
+
+    if (this.gameViews[id]) {
+      this.gameViewID = id;
+      this.gameViews[id]?.setEnabled(true);
+      this.dispatchEvent(
+        new CustomEvent(`${this.onViewEnterPrefix}${id}`)
+      )
+      await this.fadeCamera(true);
+      this.previousGameViewID = id;
+    }
+  }
+
+  private async addScene(engine: Engine, canvas: HTMLElement | null): Promise<Scene> {
+    const scene = new Scene(engine);
+    scene.clearColor = new Color4(1, 1, 1, 1);
+    await this.addEnv(scene);
+    this.addcamera(scene, canvas);
+    return scene;
   }
 
   async run() {
-    if (this.gameState === GameState.Uninitialized) {
+    if (this.gameViewID === null) {
+
+      Effect.ShadersStore['customFragmentShader'] = `
+      precision highp float;
+
+      varying vec2 vUV;
+      uniform sampler2D textureSampler;
+      uniform float fadeLevel;
+
+      void main(void){
+        vec4 baseColor = texture2D(textureSampler, vUV);
+      
+        gl_FragColor = baseColor*(1.-fadeLevel) + vec4(1., 1., 1., 1.)* fadeLevel;
+      }
+      `;
+
       this.enterXRButton?.addEventListener('click', () => {
         this.enterXR();
       })
 
       const engine = new Engine(<Nullable<HTMLCanvasElement>>this.canvas, true);
+      engine.loadingScreen = new LoadingScreen('Please wait');
+
+
+
+      const scene = this.scene = await this.addScene(engine, this.canvas);
+      engine.runRenderLoop(() => scene.render());
+
+      this.gameViews[GameView.Playing] = await this.createPlayingView(scene);
+      this.gameViews[GameView.MainMenu] = await this.createMainMenuView(scene);
+      this.gameViews[GameView.End] = await this.createEndView(scene);
+      this.setGameView(GameView.MainMenu);
+
+      this.addLightsAndShadows(scene);
+
+      this.xrHelper = await this.setupXR(scene);
       engine.hideLoadingUI();
-      const scenes: Scene[] = [];
 
-      this.setGameState(GameState.Loading);
+    }
+  }
 
-      engine.runRenderLoop(() => {
-        if (scenes[this.gameState]) {
-          scenes[this.gameState].render()
-        } else {
-          throw Error('Missing scene');
-        };
+  private async fadeCamera(reverse: boolean = false) {
+    const scene = this.scene;
+    if (scene) {
+      const postProcess = new PostProcess(
+        reverse ? 'fadeIn' : 'fadeOut',
+        'custom', ['fadeLevel'], null, 1.0, scene.activeCamera
+      );
+      let from = 0.0;
+      let to = 1.0;
+      let speed = 0.05;
+      if (reverse) {
+        from = 1.0;
+        to = 0.0;
+        speed = -0.03;
+      }
+
+      const effect = postProcess.getEffect();
+
+      const promise = new Promise((resolve) => {
+        postProcess.onBeforeRenderObservable.add(() => {
+          if ((reverse && from >= to) || (!reverse && from <= to)) {
+            effect.setFloat('fadeLevel', from);
+            from = from + speed;
+          } else {
+            effect.setFloat('fadeLevel', to);
+            resolve();
+          }
+        });
       });
-
-      scenes[GameState.Loading] = await this.createLoadingScene(engine);
-      scenes[GameState.MainMenu] = await this.createMainMenuScene(engine);
-      scenes[GameState.Playing] = await this.createPlayingScene(engine);
-      scenes[GameState.End] = await this.createEndScene(engine);
-      this.xrHelper = await this.setupXR(scenes[GameState.MainMenu]);
-      this.setGameState(GameState.MainMenu);
+      await promise;
+      postProcess.dispose();
     }
   }
 
 }
+
+
 
 export default App;
