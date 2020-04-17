@@ -1,4 +1,5 @@
 import {
+  Animation,
   AmmoJSPlugin,
   Vector3,
   WebXRState,
@@ -28,10 +29,9 @@ import '@babylonjs/loaders';
 import * as GUI from '@babylonjs/gui';
 import Emitter from './Emitter';
 import LoadingScreen from './LoadingScreen';
+import { SoundController } from './SoundController';
 
 import WebXRPolyfill from 'webxr-polyfill';
-
-new WebXRPolyfill();
 
 enum GameView {
   MainMenu,
@@ -39,24 +39,15 @@ enum GameView {
   End,
 }
 
-enum MicrophoneSensivity {
-  Low = 60,
-  Medium = 30,
-  High = 10
-}
-
 class App extends Emitter {
   private canvas: HTMLElement | null = null;
   private scene: Scene | null = null;
   private enterXRButton: HTMLElement | null = null;
+
   private xrHelper: WebXRDefaultExperience | null = null;
 
   private bullets: Mesh[] = [];
-  private bulletIndex: number = 0;
-
-  private audioContext: AudioContext | null = null;
-  private microphoneSensivity: MicrophoneSensivity
-    = MicrophoneSensivity.High;
+  private bulletIndex = 0;
 
   private gameViewID: GameView | null = null;
   private previousGameViewID: GameView | null = null;
@@ -64,9 +55,10 @@ class App extends Emitter {
   private gameViews: TransformNode[] = [];
 
   private hasShadowSuffix = '_hasShadow';
-  private onViewEnterPrefix = 'onStateVisible_';
-  private onViewExit = 'onStateHidden_';
-  private objectsFolder = './objects/';
+  private onViewEnterPrefix = 'onViewVisible_';
+  private onViewExit = 'onViewHidden_';
+
+  private soundController = new SoundController();
 
   constructor(
     canvas: HTMLElement | null,
@@ -75,59 +67,6 @@ class App extends Emitter {
     super();
     this.canvas = canvas;
     this.enterXRButton = enterXRButton;
-  }
-
-  private async startListeningforMicrophoneInput() {
-    if (this.audioContext !== null &&
-      this.audioContext.state === 'running') {
-      return;
-    }
-    const audioContext = this.audioContext = new AudioContext();
-    let lastAudioDiff = 0;
-    const mediaStreamConstraints = {
-      audio: {
-        echoCancellation: false,
-        noiseSuppression: true,
-        autoGainControl: false,
-        channelCount: 1
-      },
-      video: false
-    };
-    const stream: MediaStream = await navigator.mediaDevices
-      .getUserMedia(mediaStreamConstraints);
-
-    const microphoneAudioNode = audioContext.createMediaStreamSource(stream);
-    const analyserNode = audioContext.createAnalyser();
-    analyserNode.smoothingTimeConstant = 0;
-    analyserNode.fftSize = 1024;
-    microphoneAudioNode.connect(analyserNode);
-    const scriptNode: ScriptProcessorNode =
-      audioContext.createScriptProcessor(0, 1, 1);
-
-    if (scriptNode !== null) {
-      scriptNode.connect(analyserNode);
-      scriptNode.onaudioprocess = () => {
-        const frequencyArray: Uint8Array = new Uint8Array(analyserNode.frequencyBinCount);
-        analyserNode.getByteFrequencyData(frequencyArray);
-
-        let values = 0;
-        const length = frequencyArray.length;
-        for (let i = 0; i < length; i++) {
-          values += (frequencyArray[i]);
-        }
-        const avarageValue = values / length;
-
-        const diff = avarageValue - lastAudioDiff;
-        if (diff > this.microphoneSensivity) {
-          this.dispatchEvent(new CustomEvent('onSound', {
-            detail: {
-              value: diff
-            }
-          }));
-        }
-        lastAudioDiff = avarageValue
-      };
-    }
   }
 
   private enableScenePhysics(scene: Scene): void {
@@ -162,7 +101,7 @@ class App extends Emitter {
     camera.inputs.clear();
     camera.inputs.addMouse();
 
-    camera.setTarget(new Vector3(0, 1.6, 0));
+    camera.setTarget(new Vector3(0, 3, 0));
 
     if (canvas !== null) {
       camera.attachControl(canvas, true);
@@ -229,7 +168,6 @@ class App extends Emitter {
 
     const shadowGenerator = new ShadowGenerator(1024, light2);
 
-
     scene.meshes.forEach(mesh => {
       if (mesh.name.endsWith(this.hasShadowSuffix)) {
         shadowGenerator.addShadowCaster(mesh);
@@ -241,12 +179,6 @@ class App extends Emitter {
 
 
   private async enterXR() {
-    try {
-      await this.startListeningforMicrophoneInput();
-    } catch (error) {
-      alert('Error getting microphone. Sound input disabled. ' + error);
-    }
-
     try {
       await this.xrHelper?.baseExperience
         .enterXRAsync('immersive-vr', 'local-floor');
@@ -272,7 +204,6 @@ class App extends Emitter {
     }
 
     const xrHelper = await scene.createDefaultXRExperienceAsync(XRExperienceOptions);
-    // engine.setHardwareScalingLevel(0.25); 
     if (xrHelper.baseExperience) {
       xrHelper.baseExperience.onStateChangedObservable.add((state) => {
         if (state === WebXRState.IN_XR || state === WebXRState.NOT_IN_XR) {
@@ -285,12 +216,20 @@ class App extends Emitter {
 
     xrHelper.pointerSelection.displayLaserPointer = false;
     xrHelper.pointerSelection.disablePointerLighting = false;
-    // xrHelper.baseExperience.sessionManager.scene
-    // xrHelper.renderTarget = new WebXRRenderTarget()
+
     return xrHelper;
   }
 
-  private async addEnv(scene: Scene): Promise<Mesh | null> {
+  private async addScene(engine: Engine, canvas: HTMLElement | null)
+  : Promise<Scene> {
+  const scene = new Scene(engine);
+  scene.clearColor = new Color4(1, 1, 1, 1);
+  await this.addEnvironment(scene);
+  this.addcamera(scene, canvas);
+  return scene;
+}
+
+  private async addEnvironment(scene: Scene): Promise<Mesh | null> {
     let ground = null;
     this.enableScenePhysics(scene);
 
@@ -340,9 +279,10 @@ class App extends Emitter {
     return ground;
   }
 
-  private addGui(
+  private addMiniGUI(
     root: TransformNode,
-    buttons: { text: string, textSize: number, handler: Function, }[]
+    buttons: { text: string, textSize: number, handler: Function }[],
+    text: string = ''
   ): Mesh {
 
     const guiPlane = Mesh.CreatePlane('plane', 2, root.getScene());
@@ -364,10 +304,17 @@ class App extends Emitter {
       guiButton.background = 'White';
       guiButton.thickness = 1;
       guiButton.cornerRadius = 50;
-      // guiButton.fontFamily = 'Curier';
       guiButton.onPointerClickObservable.add((vector, event) => button.handler(event))
       panel.addControl(guiButton);
     })
+    if (text) {
+      const text1 = new GUI.TextBlock('text');
+      text1.text = text;
+      text1.color = 'Gray';
+      text1.height = '100px';
+      text1.fontSize = 30;
+      panel.addControl(text1);
+    }
     return guiPlane;
   }
   private async createMainMenuView(scene: Scene): Promise<TransformNode> {
@@ -376,9 +323,10 @@ class App extends Emitter {
 
 
     const getMicriphoneButtonStringText = () => {
-      return 'Micophone\sensitivity\n' + MicrophoneSensivity[this.microphoneSensivity];
+      return 'Micophone sensitivity\n' +
+        this.soundController.getMicrophoneSensitivity();
     }
-    this.addGui(root,
+    this.addMiniGUI(root,
       [
         {
           text: 'Start',
@@ -387,27 +335,59 @@ class App extends Emitter {
         },
         {
           text: getMicriphoneButtonStringText(),
-          textSize: 40,
+          textSize: 30,
           handler: (event: EventState) => {
-            const micSensivityValues =
-              Object.values(MicrophoneSensivity).filter(key => typeof key === 'number');
-            const index = micSensivityValues.indexOf(this.microphoneSensivity);
-            this.microphoneSensivity =
-              <MicrophoneSensivity>micSensivityValues[index + 1] || micSensivityValues[0];
+            this.soundController.changeSensitivity();
             const button = <GUI.Button>event.target;
             if (button.textBlock)
               button.textBlock.text = getMicriphoneButtonStringText();;
           }
         }
-      ]);
+      ], 'Make some noise to test the microphone input');
 
-
-
-    const sphere = MeshBuilder.CreateSphere('s', { diameter: 2 })
+    const sphere = MeshBuilder.CreateSphere('sphere', { diameter: 0.2 })
     sphere.parent = root;
-    sphere.position.y = 1;
-    sphere.position.z = .5;
+    sphere.position.y = 1.4;
+    sphere.position.z = 1;
+    sphere.material = this.addStandardMaterial(scene, '#ff0000');
+    const animbox = new Animation(
+      'miccheck', 'scaling', 30,
+      Animation.ANIMATIONTYPE_VECTOR3,
+      Animation.ANIMATIONLOOPMODE_CYCLE
+    );
+    animbox.enableBlending = true;
+    animbox.blendingSpeed = 0.01;
+    sphere.animations = [animbox];
+    const initialScale = sphere.scaling.clone();
 
+    const handleOnAudio = (event: any) => {
+      const size = event.detail.value * 10;
+      console.log(size);
+      animbox.setKeys([
+        {
+          frame: 0,
+          value: initialScale
+        },
+        {
+          frame: 15,
+          value: new Vector3(size, size, size)
+        },
+        {
+          frame: 30,
+          value: initialScale
+        }
+      ]);
+      scene.beginAnimation(sphere, 0, 30, false);
+    };
+
+    this.addViewHandlers(
+      GameView.MainMenu,
+      () => 
+        this.soundController.addEventListener('onAudio', handleOnAudio)
+      ,
+      () => 
+        this.soundController.removeEventListener('onAudio', handleOnAudio)
+      )
 
     return root;
   }
@@ -417,7 +397,7 @@ class App extends Emitter {
     const root = new TransformNode('End');
     root.setEnabled(false);
 
-    this.addGui(root, [{
+    this.addMiniGUI(root, [{
       text: 'OK',
       textSize: 50,
       handler: () => {
@@ -447,11 +427,11 @@ class App extends Emitter {
   }
 
   private addViewHandlers(
-    state: GameView,
+    viewId: GameView,
     onEnter: EventListener,
     onExit: EventListener): void {
-    this.addEventListener(`${this.onViewEnterPrefix}${state}`, onEnter);
-    this.addEventListener(`${this.onViewExit}${state}`, onExit);
+    this.addEventListener(`${this.onViewEnterPrefix}${viewId}`, onEnter);
+    this.addEventListener(`${this.onViewExit}${viewId}`, onExit);
   }
 
   private async setGameView(id: GameView) {
@@ -476,39 +456,22 @@ class App extends Emitter {
     }
   }
 
-  private async addScene(engine: Engine, canvas: HTMLElement | null): Promise<Scene> {
-    const scene = new Scene(engine);
-    scene.clearColor = new Color4(1, 1, 1, 1);
-    await this.addEnv(scene);
-    this.addcamera(scene, canvas);
-    return scene;
-  }
-
   async run() {
     if (this.gameViewID === null) {
 
-      Effect.ShadersStore['customFragmentShader'] = `
-      precision highp float;
-
-      varying vec2 vUV;
-      uniform sampler2D textureSampler;
-      uniform float fadeLevel;
-
-      void main(void){
-        vec4 baseColor = texture2D(textureSampler, vUV);
-      
-        gl_FragColor = baseColor*(1.-fadeLevel) + vec4(1., 1., 1., 1.)* fadeLevel;
-      }
-      `;
-
       this.enterXRButton?.addEventListener('click', () => {
         this.enterXR();
-      })
+      });
+
+      this.soundController.init();
 
       const engine = new Engine(<Nullable<HTMLCanvasElement>>this.canvas, true);
       engine.loadingScreen = new LoadingScreen('Please wait');
 
-
+      if (!(new WebXRPolyfill()).nativeWebXR) {
+        // FIXME: FirefoxReality needs this 
+        engine.setHardwareScalingLevel(0.5);
+      }
 
       const scene = this.scene = await this.addScene(engine, this.canvas);
       engine.runRenderLoop(() => scene.render());
@@ -528,36 +491,47 @@ class App extends Emitter {
 
   private async fadeCamera(reverse: boolean = false) {
     const scene = this.scene;
+
     if (scene) {
-      const postProcess = new PostProcess(
-        reverse ? 'fadeIn' : 'fadeOut',
-        'custom', ['fadeLevel'], null, 1.0, scene.activeCamera
-      );
-      let from = 0.0;
-      let to = 1.0;
-      let speed = 0.05;
+
+      this.soundController.init();
+      const advancedTexture = GUI.AdvancedDynamicTexture
+        .CreateFullscreenUI('Fade' + reverse ? 'in' : 'out');
+      const rectangle = new GUI.Container('fader');
+      rectangle.background = 'white';
+
+      let from = 0;
+      let to = 1;
+      let speed = 0.04;
       if (reverse) {
-        from = 1.0;
-        to = 0.0;
-        speed = -0.03;
+        from = 1;
+        to = 0;
+        speed = -0.08;
       }
+      rectangle.alpha = from;
+      advancedTexture.addControl(rectangle);
 
-      const effect = postProcess.getEffect();
-
-      const promise = new Promise((resolve) => {
-        postProcess.onBeforeRenderObservable.add(() => {
-          if ((reverse && from >= to) || (!reverse && from <= to)) {
-            effect.setFloat('fadeLevel', from);
-            from = from + speed;
-          } else {
-            effect.setFloat('fadeLevel', to);
+      const promise = new Promise(resolve => {
+        const loop = () => {
+          from = from + speed;
+          rectangle.alpha = from;
+          if (from < 0 || from > 1) {
+            rectangle.alpha = to;
+            scene.onBeforeRenderObservable.removeCallback(loop);
             resolve();
+          } else {
+            rectangle.alpha = from;
           }
-        });
-      });
+        };
+        scene.onBeforeRenderObservable.add(loop);
+      })
+
       await promise;
-      postProcess.dispose();
+
+      advancedTexture.dispose();
     }
+
+
   }
 
 }
