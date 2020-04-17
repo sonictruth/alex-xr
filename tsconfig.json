@@ -4,8 +4,8 @@
     "module": "commonjs",
     "jsx": "preserve",
     "esModuleInterop": true,
-    "sourceMap": true,
-    "allowJs": true,
+    "sourceMap": false,
+    "allowJs": false,
     "lib": [
       "es2017",
       "dom"

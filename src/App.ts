@@ -23,7 +23,10 @@ import {
   AssetsManager,
   PostProcess,
   Effect,
-  EventState
+  EventState,
+  SceneLoader,
+  ExecuteCodeAction,
+  ActionManager
 } from '@babylonjs/core';
 import '@babylonjs/loaders';
 import * as GUI from '@babylonjs/gui';
@@ -188,7 +191,11 @@ class App extends Emitter {
     }
   }
 
-  private async setupXR(scene: Scene, groundMashName: string = 'ground')
+  private getGround(scene: Scene) {
+    return scene.getMeshByName('BackgroundPlane');
+  }
+
+  private async setupXR(scene: Scene)
     : Promise<WebXRDefaultExperience> {
 
     const engine = scene.getEngine();
@@ -197,7 +204,7 @@ class App extends Emitter {
       disableTeleportation: true
     };
 
-    const ground = scene.getMeshByName('BackgroundPlane');
+    const ground = this.getGround(scene);
     if (ground !== null) {
       console.log('setupXR found ground');
       XRExperienceOptions.floorMeshes = [ground];
@@ -221,13 +228,13 @@ class App extends Emitter {
   }
 
   private async addScene(engine: Engine, canvas: HTMLElement | null)
-  : Promise<Scene> {
-  const scene = new Scene(engine);
-  scene.clearColor = new Color4(1, 1, 1, 1);
-  await this.addEnvironment(scene);
-  this.addcamera(scene, canvas);
-  return scene;
-}
+    : Promise<Scene> {
+    const scene = new Scene(engine);
+    scene.clearColor = new Color4(1, 1, 1, 1);
+    await this.addEnvironment(scene);
+    this.addcamera(scene, canvas);
+    return scene;
+  }
 
   private async addEnvironment(scene: Scene): Promise<Mesh | null> {
     let ground = null;
@@ -244,13 +251,12 @@ class App extends Emitter {
     }
     await assetsManager.loadAsync();
 
-    const worldSize = 1000;
     const envHelper = scene.createDefaultEnvironment({
       skyboxColor: Color3.White(),
       groundColor: Color3.White(),
       skyboxTexture: skyBoxTexture,
-      skyboxSize: worldSize,
-      groundSize: worldSize,
+      skyboxSize: 2000,
+      groundSize: 1000,
       enableGroundShadow: true
     });
 
@@ -276,6 +282,7 @@ class App extends Emitter {
         scene
       );
     }
+ 
     return ground;
   }
 
@@ -366,10 +373,6 @@ class App extends Emitter {
       animbox.setKeys([
         {
           frame: 0,
-          value: initialScale
-        },
-        {
-          frame: 15,
           value: new Vector3(size, size, size)
         },
         {
@@ -382,12 +385,12 @@ class App extends Emitter {
 
     this.addViewHandlers(
       GameView.MainMenu,
-      () => 
+      () =>
         this.soundController.addEventListener('onAudio', handleOnAudio)
       ,
-      () => 
+      () =>
         this.soundController.removeEventListener('onAudio', handleOnAudio)
-      )
+    )
 
     return root;
   }
@@ -412,17 +415,55 @@ class App extends Emitter {
   private async createPlayingView(scene: Scene): Promise<TransformNode> {
     const root = new TransformNode('Playing');
     root.setEnabled(false);
-    const box = MeshBuilder.CreateBox('box', { size: 1 }, scene)
-    box.position = new Vector3(0, 2, 1);
-    box.parent = root;
 
+    const earthNode = new TransformNode('e01');
+    earthNode.parent = root;
+    const mesh = await SceneLoader.ImportMeshAsync('RotateMe', './objects/', 'earth.gltf');
+    mesh.meshes[0].parent = earthNode;
+    earthNode.position.x = 0;
+    earthNode.scaling = new Vector3(500, 500, 500);
+    earthNode.position.z = 600;
+    earthNode.position.y = -300;
 
-    this.addEventListener(`${this.onViewEnterPrefix}${GameView.Playing}`,
-      (event) => {
-        setTimeout(() => {
-          this.setGameView(GameView.End);
-        }, 5000)
-      });
+    const earthAnimation = new Animation('earth01', 'rotation', 30, Animation.ANIMATIONTYPE_VECTOR3);
+    earthAnimation.setKeys([
+      {
+        frame: 0,
+        value: Vector3.Zero,
+      },
+      {
+        frame: 2530,
+        value: new Vector3(-Math.PI * 2, 0, - Math.PI * 2),
+      }
+    ]);
+
+    const throwBulletWrapper = () => {
+      this.throwBullet(200, scene);
+    }
+
+    const main = <Mesh>mesh.meshes[0];
+    
+ 
+
+    earthNode.animations.push(earthAnimation);
+    const ground = this.getGround(scene);
+    this.addViewHandlers(
+      GameView.Playing,
+      () => {
+        scene.beginAnimation(earthNode, 0, 2530, true);
+        ground?.dispose();
+        this.addBullets(scene);
+        this.soundController.addEventListener('onAudio', throwBulletWrapper);
+
+      },
+      () => {
+        scene.stopAnimation(earthNode);
+        ground?.setEnabled(true);
+        this.removeBullets(scene);
+        this.soundController.removeEventListener('onAudio', throwBulletWrapper);
+
+      }
+    );
     return root;
   }
 
